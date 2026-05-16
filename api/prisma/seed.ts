@@ -1,8 +1,21 @@
 import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
-const templates = [
+// 内联 Json 类型定义，避免 as unknown[] 转换和外部依赖
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
+interface TemplateDef {
+  name: string;
+  description: string;
+  identity: JsonValue;
+  soul: JsonValue;
+  agents: JsonValue;
+  memory: JsonValue;
+}
+
+const templates: TemplateDef[] = [
   {
     name: '温暖伴侣',
     description: '一个温暖、富有同理心的陪伴者，永远在那里倾听你、记住你的故事，与你一起成长。适合日常聊天和情感支持。',
@@ -163,97 +176,121 @@ const templates = [
 
 async function main() {
   console.log('Start seeding templates...');
-  
-  // Create a seed user for templates
+
+  // 生成有效的 bcrypt hash，避免 NOT_FOR_LOGIN 导致登录流程报错
+  const invalidPasswordHash = await bcrypt.hash(
+    `seed-inactive-${Date.now()}`,
+    10,
+  );
+
+  // Create a seed user for templates (idempotent)
   const seedUser = await prisma.user.upsert({
     where: { email: 'templates@memoryforge.app' },
     update: {},
     create: {
       email: 'templates@memoryforge.app',
-      passwordHash: 'NOT_FOR_LOGIN', // These templates are system templates
+      passwordHash: invalidPasswordHash,
       name: 'Memory Forge',
       role: 'ADMIN',
     },
   });
-  
+
   for (const template of templates) {
     // Generate system prompt
+    const identity = template.identity as Record<string, unknown>;
+    const soul = template.soul as Record<string, unknown>;
+    const agents = template.agents as Record<string, unknown>;
+
     const systemPrompt = `# 系统提示 - ${template.name}
 
 ## 身份
-角色: ${template.identity.role}
-${template.identity.toneStyles ? `语气风格: ${template.identity.toneStyles.join('、')}` : ''}
-口头禅: ${template.identity.catchphrase}
+角色: ${identity.role}
+${identity.toneStyles ? `语气风格: ${(identity.toneStyles as string[]).join('、')}` : ''}
+口头禅: ${identity.catchphrase}
 
 ## 灵魂
-核心驱动力: ${template.soul.coreDrive}
-情感模式: ${template.soul.emotionalMode}
-核心价值观: ${template.soul.coreValues}
+核心驱动力: ${soul.coreDrive}
+情感模式: ${soul.emotionalMode}
+核心价值观: ${soul.coreValues}
 
 ## 行为规则
-工作模式: ${template.agents.workMode}
+工作模式: ${agents.workMode}
 
 ---
 你以上述人格特质为基础回应用户。记住你的长期记忆，保持一致的人格表现。`;
 
-    const personality = await prisma.personality.upsert({
-      where: {
-        id: `template-${template.name}`,
-      },
-      update: {
-        name: template.name,
-        description: template.description,
-        identity: template.identity as unknown[],
-        soul: template.soul as unknown[],
-        agents: template.agents as unknown[],
-        memory: template.memory as unknown[],
-        systemPrompt,
-        isPublic: true,
-        isTemplate: true,
-      },
-      create: {
-        id: `template-${template.name}`,
-        userId: seedUser.id,
-        name: template.name,
-        description: template.description,
-        identity: template.identity as unknown[],
-        soul: template.soul as unknown[],
-        agents: template.agents as unknown[],
-        memory: template.memory as unknown[],
-        systemPrompt,
-        isPublic: true,
-        isTemplate: true,
-      },
+    // 修复1：不按硬编码的非 uuid id 做 upsert
+    // 改用 userId + name 查找，保证同名模板能正确匹配更新
+    const existingPersonality = await prisma.personality.findFirst({
+      where: { userId: seedUser.id, name: template.name },
     });
-    
-    // Create template record
+
+    let personalityId: string;
+
+    if (existingPersonality) {
+      // update 路径：保留原有 id
+      await prisma.personality.update({
+        where: { id: existingPersonality.id },
+        data: {
+          name: template.name,
+          description: template.description,
+          identity: template.identity,
+          soul: template.soul,
+          agents: template.agents,
+          memory: template.memory,
+          systemPrompt,
+          isPublic: true,
+          isTemplate: true,
+        },
+      });
+      personalityId = existingPersonality.id;
+    } else {
+      // create 路径：不指定 id，让 Prisma 自动生成 uuid
+      const created = await prisma.personality.create({
+        data: {
+          userId: seedUser.id,
+          name: template.name,
+          description: template.description,
+          identity: template.identity,
+          soul: template.soul,
+          agents: template.agents,
+          memory: template.memory,
+          systemPrompt,
+          isPublic: true,
+          isTemplate: true,
+        },
+      });
+      personalityId = created.id;
+    }
+
+    // Template upsert 基于 personalityId（已标记 @unique）
     await prisma.template.upsert({
-      where: { personalityId: personality.id },
+      where: { personalityId },
       update: {
         name: template.name,
         description: template.description,
-        category: template.identity.role as string,
-        tags: template.identity.toneStyles as string[] || [],
-        downloadCount: 0,
+        category: identity.role as string,
+        tags: (identity.toneStyles as string[]) || [],
+        // 修复4：不在 update 中重置 downloadCount，保持已有计数
         rating: 4.5,
         ratingCount: 0,
       },
       create: {
-        personalityId: personality.id,
+        personalityId,
         userId: seedUser.id,
         name: template.name,
         description: template.description,
-        category: template.identity.role as string,
-        tags: template.identity.toneStyles as string[] || [],
+        category: identity.role as string,
+        tags: (identity.toneStyles as string[]) || [],
         downloadCount: 0,
         rating: 4.5,
         ratingCount: 0,
       },
     });
-    
-    console.log(`Created template: ${template.name}`);
+
+    console.log(`Upserted template: ${template.name}`);
   }
-  
+
   console.log('Seeding finished.');
 }
 
