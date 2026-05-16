@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String   @map("password_hash")
+  name          String?
+  avatar        String?
+  role          UserRole @default(USER)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  personalities Personality[]
+  conversations Conversation[]
+  templates     Template[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+model Personality {
+  id          String  @id @default(uuid())
+  userId      String  @map("user_id")
+  name        String
+  description String?
+
+  identity Json @default("{}")
+  soul     Json @default("{}")
+  agents   Json @default("{}")
+  memory   Json @default("[]")
+
+  systemPrompt String? @map("system_prompt")
+  version      Int     @default(1)
+  isPublic     Boolean @default(false) @map("is_public")
+  isTemplate   Boolean @default(false) @map("is_template")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  template      Template?      @relation("PersonalityTemplate")
+
+  @@index([userId])
+  @@index([isTemplate])
+  @@index([isPublic])
+  @@map("personalities")
+}
+
+model Template {
+  id          String @id @default(uuid())
+  name        String
+  description String
+  category    String
+  tags        String[]
+
+  personalityId String @unique @map("personality_id")
+  userId        String @map("user_id")
+
+  downloadCount Int    @default(0) @map("download_count")
+  rating        Float  @default(0)
+  ratingCount   Int    @default(0) @map("rating_count")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  personality Personality @relation("PersonalityTemplate", fields: [personalityId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([category])
+  @@index([downloadCount])
+  @@map("templates")
+}
+
+model Conversation {
+  id            String @id @default(uuid())
+  userId        String @map("user_id")
+  personalityId String @map("personality_id")
+  title         String @default("新对话")
+  messages      Json   @default("[]")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  personality Personality @relation(fields: [personalityId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([personalityId])
+  @@map("conversations")
+}
