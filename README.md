@@ -1,20 +1,20 @@
 # Memory Forge Backend
 
-> 记忆锻造后端 — 为认知基础设施提供持久化层。
+> 记忆熔炉后端 — BDI 认知评估平台的数据与记忆服务层。
 
-**Memory Forge** 是 Suk-Builder 生态中的记忆管理后端服务，负责：
-- 记忆数据的存储与检索
-- 跨域认知映射的持久化
-- Builder-System 体系的数据支撑
+## 这是什么
 
-## 所属
+Memory Forge Backend 是 [BDI 认知评估平台](http://8.160.174.144/) 的后端服务层，负责认知评估数据的存储、记忆模型的训练与推理、以及用户评估历史的持久化。
 
-[Suk-Builder](https://github.com/Suk-Builder) · 认知基础设施建造者的工坊
+## 关联产品
+
+- [BDI 认知评估 SaaS](http://8.160.174.144/) — 前端评估界面
+- [memory-forge](https://github.com/Suk-Builder/memory-forge) — 前端应用
 
 ## 技术栈
 
 TypeScript / Node.js
 
-## License
+## 许可证
 
-MIT © Suk-Builder
+MIT
